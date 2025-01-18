@@ -1,13 +1,19 @@
-﻿using System.Text;
+using System.Text;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
+using System.Formats.Tar;
+using System.IO.Compression;
+
 
 class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
         if (args.Length != 3)
         {
-            Console.WriteLine("Usage: ha-backup-decrypt <input> <output> <key>");
+            Console.WriteLine("Usage: ha-backup-decrypt <input> <output> <key>" + Environment.NewLine + Environment.NewLine);
+            Console.WriteLine("  <input>    encypted single tar.gz file or complete .tar backup with multiple encrypted tar.gz files");
+            Console.WriteLine("  <output>   output filename or destination directory");
             return;
         }
 
@@ -15,6 +21,41 @@ class Program
         string outputFilePath = args[1];
         string password = args[2];
 
+        //check if it's single encrypted .tar.gz?
+        if(inputFilePath.EndsWith(".tar.gz", StringComparison.InvariantCultureIgnoreCase))
+        {
+            //single encrypted .tar.gz
+            if(DecryptBackup(inputFilePath, outputFilePath, password))
+                Console.WriteLine($"Decryption successful! Decrypted file saved to: {outputFilePath}");                   
+        }
+        else if(inputFilePath.EndsWith(".tar", StringComparison.InvariantCultureIgnoreCase))
+        {
+            //tar archive with multiple encrypted .tar.gz files
+            //first, extract it
+            string outputDir = outputFilePath.Replace(".tar.gz", "", StringComparison.InvariantCultureIgnoreCase).Replace(".tar", "", StringComparison.InvariantCultureIgnoreCase) + "\\";
+            DirectoryInfo d = new DirectoryInfo(outputDir);
+            if(!Directory.Exists(outputDir)) Directory.CreateDirectory(outputDir);
+            await TarFile.ExtractToDirectoryAsync(inputFilePath, outputDir, true);
+            foreach (var file in d.GetFiles("*.tar.gz"))
+            {
+                //decrypt .tar.gz
+                string sFileNameDecrypted = file.ToString().Replace(".tar.gz", "_decypted.tar.gz", StringComparison.InvariantCultureIgnoreCase);
+                string sFileName = file.ToString();                
+                if(DecryptBackup(sFileName, sFileNameDecrypted, password))
+                {
+                    //decryption successfull
+                    file.Delete();
+                    File.Move(sFileNameDecrypted, sFileName);
+                    Console.WriteLine($"Decryption successful! Decrypted file saved to: {sFileName}");                   
+                }
+            }
+        }
+
+    }
+
+    static bool DecryptBackup(string inputFilePath, string outputFilePath, string password)
+    {
+        bool bSuccess = false;
         try
         {
             byte[] key = GetPasswordHash(password);
@@ -42,12 +83,13 @@ class Program
                 }
             }
 
-            Console.WriteLine($"Decryption successful! Decrypted file saved to: {outputFilePath}");
+            bSuccess = true;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error during decryption: {ex.Message}");
         }
+        return bSuccess;
     }
 
     static byte[] GetPasswordHash(string password)
@@ -87,4 +129,5 @@ class Program
         Array.Copy(iv, finalIV, 16);
         return finalIV;
     }
+   
 }
